@@ -1,7 +1,16 @@
+
 import streamlit as st
+
 from services.search_service import search_web
 from services.factcheck_service import factcheck_claim
-from database.db import init_db, save_fact_check, get_fact_checks
+from services.claim_service import split_claims
+
+from database.db import (
+    init_db,
+    save_fact_check,
+    get_fact_checks
+)
+
 
 st.set_page_config(
     page_title="RA's FactCheckAI",
@@ -20,7 +29,7 @@ if "submitted_claim" not in st.session_state:
     st.session_state.submitted_claim = None
 
 
-# Callback: preserve submitted claim and clear input
+# Submit callback
 def submit_claim():
     st.session_state.submitted_claim = st.session_state.claim_input
     st.session_state.claim_input = ""
@@ -31,106 +40,136 @@ st.title("RA's FactCheckAI")
 st.write("Verify claims using evidence and AI.")
 
 st.text_area(
-    "Enter a claim to fact-check",
-    placeholder="Example: The Earth revolves around the Sun.",
-    height=120,
+    "Enter one or more claims",
+    placeholder=(
+        "India became independent in 1947.\n"
+        "The Earth revolves around the Sun.\n"
+        "Hyderabad is in Telangana."
+    ),
+    height=150,
     key="claim_input"
 )
 
 st.button(
-    "Fact Check Claim",
+    "Fact Check Claims",
     type="primary",
     on_click=submit_claim
 )
 
 
-# Process submitted claim
-claim = st.session_state.pop("submitted_claim", None)
+# Process submitted input
+submitted_text = st.session_state.pop("submitted_claim", None)
 
-if claim is not None:
+if submitted_text is not None:
 
-    if not claim.strip():
-        st.warning("Please enter a claim first.")
+    if not submitted_text.strip():
+        st.warning("Please enter at least one claim.")
 
     else:
         try:
-            with st.spinner("Searching for evidence..."):
-                results = search_web(claim)
+            with st.spinner("Extracting individual claims..."):
+                claims = split_claims(submitted_text)
 
-            if not results:
-                st.warning("No search results found.")
+            if not claims:
+                st.warning(
+                    "No factual claims were detected. "
+                    "Please enter factual statements instead of questions or opinions."
+                )
 
             else:
-                with st.spinner("AI is analyzing the evidence..."):
-                    result = factcheck_claim(claim, results)
+                st.success(f"Detected {len(claims)} factual claim(s).")
 
-                fact_check_id = save_fact_check(
-                    claim,
-                    result,
-                    results
-                )
+                for index, claim in enumerate(claims, start=1):
 
-                st.success(
-                    f"Fact-check saved successfully! ID: {fact_check_id}"
-                )
+                    st.divider()
+                    st.header(f"Claim {index}")
+                    st.write(claim)
 
-                st.divider()
-                st.subheader("Fact Check Result")
+                    try:
+                        with st.spinner(f"Searching evidence for claim {index}..."):
+                            results = search_web(claim)
 
-                col1, col2 = st.columns(2)
+                        if not results:
+                            st.warning("No search results found for this claim.")
+                            continue
 
-                with col1:
-                    st.metric("Verdict", result.verdict.value)
+                        with st.spinner(f"Analyzing claim {index}..."):
+                            result = factcheck_claim(claim, results)
 
-                with col2:
-                    st.metric(
-                        "AI Confidence",
-                        f"{result.confidence:.0%}"
-                    )
+                        fact_check_id = save_fact_check(
+                            claim,
+                            result,
+                            results
+                        )
 
-                st.subheader("Explanation")
-                st.write(result.explanation)
+                        st.success(
+                            f"Fact-check saved successfully! ID: {fact_check_id}"
+                        )
 
-                st.subheader("Supporting Evidence")
+                        col1, col2 = st.columns(2)
 
-                if result.supporting_evidence:
-                    for item in result.supporting_evidence:
-                        st.write(f"- {item}")
-                else:
-                    st.info("No supporting evidence identified.")
+                        with col1:
+                            st.metric("Verdict", result.verdict.value)
 
-                st.subheader("Contradicting Evidence")
+                        with col2:
+                            st.metric(
+                                "AI Confidence",
+                                f"{result.confidence:.0%}"
+                            )
 
-                if result.contradicting_evidence:
-                    for item in result.contradicting_evidence:
-                        st.write(f"- {item}")
-                else:
-                    st.info("No contradicting evidence identified.")
+                        st.subheader("Explanation")
+                        st.write(result.explanation)
 
-                st.subheader("Limitations")
+                        st.subheader("Supporting Evidence")
 
-                if result.limitations:
-                    for item in result.limitations:
-                        st.write(f"- {item}")
-                else:
-                    st.info("No limitations reported.")
+                        if result.supporting_evidence:
+                            for item in result.supporting_evidence:
+                                st.write(f"- {item}")
+                        else:
+                            st.info("No supporting evidence identified.")
 
-                st.divider()
-                st.subheader("Search Sources")
+                        st.subheader("Contradicting Evidence")
 
-                for index, source in enumerate(results, start=1):
-                    with st.expander(
-                        f"{index}. {source.get('title', 'Untitled')}"
-                    ):
-                        st.write(source.get("snippet", ""))
+                        if result.contradicting_evidence:
+                            for item in result.contradicting_evidence:
+                                st.write(f"- {item}")
+                        else:
+                            st.info("No contradicting evidence identified.")
 
-                        link = source.get("link")
+                        st.subheader("Limitations")
 
-                        if link:
-                            st.markdown(f"[Visit source]({link})")
+                        if result.limitations:
+                            for item in result.limitations:
+                                st.write(f"- {item}")
+                        else:
+                            st.info("No limitations reported.")
+
+                        st.subheader("Search Sources")
+
+                        for source_index, source in enumerate(
+                            results,
+                            start=1
+                        ):
+                            with st.expander(
+                                f"{source_index}. "
+                                f"{source.get('title', 'Untitled')}"
+                            ):
+                                st.write(source.get("snippet", ""))
+
+                                link = source.get("link")
+
+                                if link:
+                                    st.markdown(
+                                        f"[Visit source]({link})"
+                                    )
+
+                    except Exception as error:
+                        st.error(
+                            f"Fact-checking failed for claim {index}: {error}"
+                        )
 
         except Exception as error:
-            st.error(f"Fact-checking failed: {error}")
+            st.error(f"Claim extraction failed: {error}")
 
 
 # Fact-check history
@@ -140,11 +179,18 @@ st.subheader("Fact-check History")
 history = get_fact_checks()
 
 if history:
+
     for item in history:
+
         with st.expander(
             f"{item['id']} - {item['claim']} | {item['verdict']}"
         ):
-            st.write("**Confidence:**", f"{item['confidence']:.0%}")
+
+            st.write(
+                "**Confidence:**",
+                f"{item['confidence']:.0%}"
+            )
+
             st.write("**Explanation:**", item["explanation"])
 
             st.write("**Supporting Evidence:**")
@@ -155,10 +201,12 @@ if history:
             st.write("**Sources:**")
 
             for source in item["sources"]:
+
                 if source["url"]:
                     st.markdown(
                         f"[{source['title'] or 'Visit source'}]"
                         f"({source['url']})"
                     )
+
 else:
     st.info("No previous fact-checks found.")
