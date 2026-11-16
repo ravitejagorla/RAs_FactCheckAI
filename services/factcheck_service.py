@@ -31,10 +31,31 @@ def factcheck_claim(claim: str, search_results: list[dict]) -> FactCheckResult:
         - Do not assume search ranking indicates reliability.
         - Identify evidence supporting and contradicting the claim.
         - Do not treat missing evidence as proof that a claim is false.
-        - Use Insufficient Evidence when the available information is inadequate.
-        - Use Partially True when only part of the claim is supported.
+        - Use "Insufficient Evidence" when the available information is inadequate.
+        - Use "Partially True" when only part of the claim is supported.
         - Explain uncertainty and limitations.
         - Confidence is your subjective assessment, not a verified probability.
-        - Return only the requested structured fields.
+
+        Return a valid JSON object with EXACTLY these six fields:
+        {{
+            "verdict": "True",
+            "confidence": 0.95,
+            "explanation": "Explain why the verdict was reached.",
+            "supporting_evidence": [
+                "Evidence supporting the claim, with relevant source details."
+            ],
+            "contradicting_evidence": [],
+            "limitations": [
+                "Mention any limitations in the available evidence."
+            ]
+        }}
+
+        Rules:
+        - Use only these verdict values: "True", "False", "Partially True",
+        "Misleading", "Insufficient Evidence".
+        - confidence must be a number between 0 and 1.
+        - All evidence and limitations must be lists of strings, not objects.
+        - Do not return fields such as claim, status, or evidence.
+        - Return JSON only. Do not include Markdown code fences.
     """
     return structured_llm.invoke(prompt)
